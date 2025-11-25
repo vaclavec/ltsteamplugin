@@ -24,6 +24,7 @@ from config import (
 from http_client import ensure_http_client
 from logger import logger
 from paths import backend_path, public_path
+from statistics import record_download as stats_record_download
 from steam_utils import detect_steam_install_path, has_lua_for_app
 from utils import count_apis, ensure_temp_download_dir, normalize_manifest_text, read_text, write_text
 
@@ -327,6 +328,14 @@ def _download_zip_for_app(appid: int):
                         _log_appid_event(f"ADDED - {name}", appid, fetched_name)
                     except Exception:
                         pass
+                    
+                    # Track download statistics
+                    try:
+                        file_size = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
+                        stats_record_download(appid, file_size)
+                    except Exception as stats_err:
+                        logger.warn(f"LuaTools: Failed to record download stats: {stats_err}")
+                    
                     _set_download_state(appid, {"status": "done", "success": True, "api": name})
                     return
                 except Exception as install_exc:

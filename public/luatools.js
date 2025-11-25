@@ -172,6 +172,12 @@
             removeBtn.style.display = 'none';
 
             const fixesMenuBtn = createMenuButton('lt-settings-fixes-menu', 'menu.fixesMenu', 'Fixes Menu', 'fa-wrench');
+            
+            const favoritesBtn = createMenuButton('lt-settings-favorites', 'menu.favorites', 'Favorite Games', 'fa-star');
+
+            const searchBtn = createMenuButton('lt-settings-search', 'menu.search', 'Search Games', 'fa-magnifying-glass');
+
+            const activityBtn = createMenuButton('lt-settings-activity', 'menu.activity', 'Activity Monitor', 'fa-chart-line');
 
             createSectionLabel('menu.advancedLabel', 'Advanced');
             const checkBtn = createMenuButton('lt-settings-check', 'menu.checkForUpdates', 'Check For Updates', 'fa-cloud-arrow-down');
@@ -288,6 +294,30 @@
                     } catch(err) {
                         backendLog('LuaTools: Fixes Menu button error: ' + err);
                     }
+                });
+            }
+
+            if (favoritesBtn) {
+                favoritesBtn.addEventListener('click', function(e){
+                    e.preventDefault();
+                    try { overlay.remove(); } catch(_) {}
+                    showFavoritesPanel();
+                });
+            }
+
+            if (searchBtn) {
+                searchBtn.addEventListener('click', function(e){
+                    e.preventDefault();
+                    try { overlay.remove(); } catch(_) {}
+                    showSearchAndFilterUI();
+                });
+            }
+
+            if (activityBtn) {
+                activityBtn.addEventListener('click', function(e){
+                    e.preventDefault();
+                    try { overlay.remove(); } catch(_) {}
+                    showActivityDashboard();
                 });
             }
 
@@ -868,7 +898,55 @@
             
             backendLog('LuaTools: Applying fix ' + fixType + ' for appid ' + appid);
             
-            // Start the download and extraction process
+            // First check for conflicts before applying
+            try {
+                Millennium.callServerMethod('luatools', 'CheckFixConflicts', { 
+                    appid: appid, 
+                    fix_type: fixType,
+                    contentScriptQuery: '' 
+                }).then(function(conflictRes){
+                    try {
+                        const conflictPayload = typeof conflictRes === 'string' ? JSON.parse(conflictRes) : conflictRes;
+                        
+                        if (conflictPayload && conflictPayload.success && conflictPayload.conflicts && conflictPayload.conflicts.length > 0) {
+                            // Show conflict warning
+                            const conflictMsg = lt('Potential conflicts detected:') + '\n' + conflictPayload.conflicts.join('\n') + '\n\n' + lt('Continue anyway?');
+                            showLuaToolsConfirm('LuaTools', conflictMsg, 
+                                function() {
+                                    // User confirmed - proceed with fix
+                                    startFixApplication(appid, downloadUrl, fixType, gameName);
+                                },
+                                function() {
+                                    // User cancelled
+                                    backendLog('LuaTools: User cancelled fix due to conflicts');
+                                }
+                            );
+                            return;
+                        }
+                        
+                        // No conflicts - proceed
+                        startFixApplication(appid, downloadUrl, fixType, gameName);
+                    } catch(err) {
+                        backendLog('LuaTools: CheckFixConflicts parse error: ' + err);
+                        startFixApplication(appid, downloadUrl, fixType, gameName);
+                    }
+                }).catch(function(err){
+                    backendLog('LuaTools: CheckFixConflicts error: ' + err);
+                    // Proceed anyway on error
+                    startFixApplication(appid, downloadUrl, fixType, gameName);
+                });
+            } catch(err) {
+                backendLog('LuaTools: Conflict check failed: ' + err);
+                startFixApplication(appid, downloadUrl, fixType, gameName);
+            }
+        } catch(err) {
+            backendLog('LuaTools: applyFix error: ' + err);
+        }
+    }
+
+    function startFixApplication(appid, downloadUrl, fixType, gameName) {
+        // Start the download and extraction process
+        try {
             Millennium.callServerMethod('luatools', 'ApplyGameFix', { 
                 appid: appid, 
                 downloadUrl: downloadUrl, 
@@ -898,7 +976,9 @@
                 ShowLuaToolsAlert('LuaTools', msg);
             });
         } catch(err) {
-            backendLog('LuaTools: applyFix error: ' + err);
+            backendLog('LuaTools: startFixApplication error: ' + err);
+            const msg = lt('Error applying fix');
+            ShowLuaToolsAlert('LuaTools', msg);
         }
     }
 
@@ -2075,6 +2155,36 @@
                             restartBtn.after(iconBtn);
                             window.__LuaToolsIconInserted = true;
                             backendLog('Inserted Icon button');
+                            
+                            // Add Statistics button right after icon button
+                            try {
+                                if (!document.querySelector('.luatools-stats-button') && !window.__LuaToolsStatsInserted) {
+                                    const statsBtn = document.createElement('a');
+                                    if (referenceBtn && referenceBtn.className) {
+                                        statsBtn.className = referenceBtn.className + ' luatools-stats-button';
+                                    } else {
+                                        statsBtn.className = 'btnv6_blue_hoverfade btn_medium luatools-stats-button';
+                                    }
+                                    statsBtn.href = '#';
+                                    statsBtn.title = 'LuaTools Statistics';
+                                    statsBtn.setAttribute('data-tooltip-text', 'LuaTools Statistics');
+                                    // Normalize margins
+                                    try {
+                                        if (referenceBtn) {
+                                            const cs = window.getComputedStyle(referenceBtn);
+                                            statsBtn.style.marginLeft = cs.marginLeft;
+                                            statsBtn.style.marginRight = cs.marginRight;
+                                        }
+                                    } catch(_) {}
+                                    const sspan = document.createElement('span');
+                                    sspan.textContent = '📊 Stats';
+                                    statsBtn.appendChild(sspan);
+                                    statsBtn.addEventListener('click', function(e){ e.preventDefault(); backendLog('LuaTools stats button clicked'); showStatisticsDashboard(); });
+                                    iconBtn.after(statsBtn);
+                                    window.__LuaToolsStatsInserted = true;
+                                    backendLog('Inserted Statistics button');
+                                }
+                            } catch(_) { backendLog('Failed to insert stats button: ' + _); }
                         }
                     } catch(_) {}
                     window.__LuaToolsRestartInserted = true;
@@ -2397,6 +2507,577 @@
     };
     
     // Use MutationObserver to catch dynamically added content
+    // Statistics Dashboard UI
+    function showStatisticsDashboard() {
+        if (document.querySelector('.luatools-stats-dashboard')) return;
+        
+        ensureLuaToolsAnimations();
+        const dashboard = document.createElement('div');
+        dashboard.className = 'luatools-stats-dashboard';
+        dashboard.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 320px;
+            background: linear-gradient(135deg, #1b2838 0%, #2a475e 100%);
+            border: 2px solid #66c0f4;
+            border-radius: 8px;
+            padding: 16px;
+            z-index: 99998;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            box-shadow: 0 20px 60px rgba(0,0,0,.8), 0 0 0 1px rgba(102,192,244,0.3);
+            animation: slideUp 0.3s ease-out;
+            max-height: 80vh;
+            overflow-y: auto;
+        `;
+        
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size: 18px; font-weight: 700; margin-bottom: 12px; color: #66c0f4; display: flex; justify-content: space-between; align-items: center;';
+        title.innerHTML = '<span>LuaTools Stats</span><span style="cursor: pointer; font-size: 20px; color: #8f98a0;" onclick="this.closest(\'.luatools-stats-dashboard\').remove()">×</span>';
+        dashboard.appendChild(title);
+        
+        const content = document.createElement('div');
+        content.style.cssText = 'font-size: 13px; line-height: 1.6;';
+        content.innerHTML = '<div style="color: #8f98a0;">Loading statistics...</div>';
+        dashboard.appendChild(content);
+        
+        document.body.appendChild(dashboard);
+        
+        // Fetch statistics from backend
+        try {
+            Millennium.callServerMethod('GetStatistics', {}, function(response) {
+                try {
+                    const stats = JSON.parse(response);
+                    let html = `
+                        <div style="background: rgba(102,192,244,0.1); padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                <span>📦 Mods Installed:</span>
+                                <strong style="color: #66c0f4;">${stats.total_mods_installed || 0}</strong>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                <span>🔧 Fixes Applied:</span>
+                                <strong style="color: #66c0f4;">${stats.total_fixes_applied || 0}</strong>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>⬇️ Downloads:</span>
+                                <strong style="color: #66c0f4;">${stats.total_downloads || 0}</strong>
+                            </div>
+                        </div>
+                        <div style="background: rgba(102,192,244,0.1); padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                <span>🎮 Games Enhanced:</span>
+                                <strong style="color: #a4d7f5;">${(stats.games_with_mods && stats.games_with_mods.length) || 0}</strong>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>📊 Last 7 Days:</span>
+                                <strong style="color: #a4d7f5;">${stats.last_7_days_downloads || 0}</strong>
+                            </div>
+                        </div>
+                    `;
+                    content.innerHTML = html;
+                } catch(err) {
+                    content.innerHTML = '<div style="color: #c7254e;">Error parsing statistics</div>';
+                }
+            });
+        } catch(err) {
+            content.innerHTML = '<div style="color: #c7254e;">Failed to load statistics</div>';
+        }
+    }
+
+    function showFavoritesPanel() {
+        if (document.querySelector('.luatools-favorites-overlay')) return;
+        
+        ensureLuaToolsAnimations();
+        ensureFontAwesome();
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'luatools-favorites-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(8px);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn 0.2s ease-out;';
+        
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position:relative;background:linear-gradient(135deg, #1b2838 0%, #2a475e 100%);color:#fff;border:2px solid #66c0f4;border-radius:8px;min-width:500px;max-width:700px;max-height:80vh;display:flex;flex-direction:column;padding:28px 32px;box-shadow:0 20px 60px rgba(0,0,0,.8), 0 0 0 1px rgba(102,192,244,0.3);animation:slideUp 0.1s ease-out;';
+        
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid rgba(102,192,244,0.3);';
+        
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size:24px;color:#fff;font-weight:700;text-shadow:0 2px 8px rgba(102,192,244,0.4);background:linear-gradient(135deg, #66c0f4 0%, #a4d7f5 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
+        title.textContent = lt('Favorite Games');
+        
+        const closeBtn = document.createElement('a');
+        closeBtn.href = '#';
+        closeBtn.style.cssText = 'display:flex;align-items:center;justify-content:center;width:40px;height:40px;background:rgba(102,192,244,0.1);border:1px solid rgba(102,192,244,0.3);border-radius:10px;color:#66c0f4;font-size:18px;text-decoration:none;transition:all 0.3s ease;cursor:pointer;';
+        closeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        closeBtn.title = lt('Close');
+        closeBtn.onmouseover = function() { this.style.background = 'rgba(102,192,244,0.25)'; this.style.transform = 'translateY(-2px) scale(1.05)'; };
+        closeBtn.onmouseout = function() { this.style.background = 'rgba(102,192,244,0.1)'; this.style.transform = 'translateY(0) scale(1)'; };
+        closeBtn.onclick = function(e){ e.preventDefault(); overlay.remove(); };
+        
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+        modal.appendChild(header);
+        
+        const content = document.createElement('div');
+        content.style.cssText = 'flex:1;overflow-y:auto;padding:16px;border:1px solid rgba(102,192,244,0.3);border-radius:12px;background:rgba(11,20,30,0.6);';
+        content.innerHTML = '<div style="text-align:center;color:#8f98a0;padding:40px 20px;"><i class="fa-solid fa-spinner" style="animation:pulse 1s infinite;margin-right:8px;"></i>' + lt('Loading favorites...') + '</div>';
+        modal.appendChild(content);
+        
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        
+        // Fetch favorite games from backend
+        try {
+            Millennium.callServerMethod('luatools', 'GetFavoriteGames', { contentScriptQuery: '' }).then(function(res){
+                try {
+                    const payload = typeof res === 'string' ? JSON.parse(res) : res;
+                    const games = (payload && payload.success && Array.isArray(payload.games)) ? payload.games : [];
+                    
+                    if (games.length === 0) {
+                        content.innerHTML = '<div style="text-align:center;color:#8f98a0;padding:40px 20px;">' + lt('No favorite games yet. Mark games as favorites from their pages!') + '</div>';
+                        return;
+                    }
+                    
+                    content.innerHTML = '';
+                    games.forEach(function(game) {
+                        const gameEl = document.createElement('div');
+                        gameEl.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px;margin-bottom:8px;background:rgba(102,192,244,0.08);border:1px solid rgba(102,192,244,0.2);border-radius:8px;transition:all 0.3s ease;';
+                        gameEl.onmouseover = function() { this.style.background = 'rgba(102,192,244,0.15)'; };
+                        gameEl.onmouseout = function() { this.style.background = 'rgba(102,192,244,0.08)'; };
+                        
+                        const icon = document.createElement('img');
+                        icon.src = game.icon || '';
+                        icon.style.cssText = 'width:48px;height:48px;border-radius:6px;object-fit:cover;';
+                        icon.onerror = function() { this.style.background = '#2a475e'; this.textContent = ''; };
+                        
+                        const info = document.createElement('div');
+                        info.style.cssText = 'flex:1;min-width:0;';
+                        
+                        const gameName = document.createElement('div');
+                        gameName.style.cssText = 'font-weight:600;color:#fff;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                        gameName.textContent = game.name;
+                        
+                        const gameId = document.createElement('div');
+                        gameId.style.cssText = 'font-size:12px;color:#8f98a0;';
+                        gameId.textContent = 'AppID: ' + game.appid;
+                        
+                        info.appendChild(gameName);
+                        info.appendChild(gameId);
+                        
+                        const star = document.createElement('a');
+                        star.href = '#';
+                        star.style.cssText = 'flex:0 0 auto;width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:rgba(255,193,7,0.2);border:1px solid rgba(255,193,7,0.4);border-radius:6px;color:#ffc107;font-size:18px;text-decoration:none;transition:all 0.3s ease;cursor:pointer;';
+                        star.innerHTML = '<i class="fa-solid fa-star"></i>';
+                        star.title = lt('Remove from favorites');
+                        star.onmouseover = function() { this.style.background = 'rgba(255,193,7,0.4)'; };
+                        star.onmouseout = function() { this.style.background = 'rgba(255,193,7,0.2)'; };
+                        star.onclick = function(e){
+                            e.preventDefault();
+                            // Remove from favorites
+                            try {
+                                Millennium.callServerMethod('luatools', 'SetGameFavorite', { appid: game.appid, isFavorite: false, contentScriptQuery: '' }).then(function(){
+                                    gameEl.style.transition = 'opacity 0.3s ease';
+                                    gameEl.style.opacity = '0.5';
+                                    setTimeout(function() { gameEl.remove(); }, 300);
+                                    if (content.querySelectorAll('[style*="padding:12px"]').length === 0) {
+                                        content.innerHTML = '<div style="text-align:center;color:#8f98a0;padding:40px 20px;">' + lt('No more favorites!') + '</div>';
+                                    }
+                                }).catch(function(err){
+                                    ShowLuaToolsAlert('LuaTools', lt('Failed to remove from favorites'));
+                                });
+                            } catch(err) {
+                                ShowLuaToolsAlert('LuaTools', lt('Failed to remove from favorites'));
+                            }
+                        };
+                        
+                        gameEl.appendChild(icon);
+                        gameEl.appendChild(info);
+                        gameEl.appendChild(star);
+                        content.appendChild(gameEl);
+                    });
+                } catch(err) {
+                    backendLog('LuaTools: Favorites parse error: ' + err);
+                    content.innerHTML = '<div style="color:#c7254e;">Error loading favorites</div>';
+                }
+            }).catch(function(err){
+                backendLog('LuaTools: Favorites fetch error: ' + err);
+                content.innerHTML = '<div style="color:#c7254e;">Failed to load favorites</div>';
+            });
+        } catch(err) {
+            backendLog('LuaTools: Favorites error: ' + err);
+            content.innerHTML = '<div style="color:#c7254e;">Failed to load favorites</div>';
+        }
+    }
+
+    function addFavoriteStarButton() {
+        // Add star toggle button to game pages for marking favorites
+        const match = window.location.href.match(/https:\/\/store\.steampowered\.com\/app\/(\d+)/) || window.location.href.match(/https:\/\/steamcommunity\.com\/app\/(\d+)/);
+        if (!match) return;
+        
+        const appid = parseInt(match[1], 10);
+        if (isNaN(appid)) return;
+        
+        // Look for button container (use same one as stats button)
+        const steamdbContainer = document.querySelector('.steamdb-buttons') || 
+                                document.querySelector('[data-steamdb-buttons]') ||
+                                document.querySelector('.apphub_OtherSiteInfo');
+        
+        if (!steamdbContainer || document.querySelector('.luatools-favorite-button')) return;
+        
+        // Create favorite button
+        const favBtn = document.createElement('a');
+        favBtn.className = 'btnv6_blue_hoverfade btn_medium luatools-favorite-button';
+        favBtn.href = '#';
+        favBtn.style.marginLeft = '6px';
+        favBtn.title = lt('Add to favorites');
+        favBtn.setAttribute('data-tooltip-text', lt('Add to favorites'));
+        const fspan = document.createElement('span');
+        fspan.textContent = '⭐ ' + lt('Favorite');
+        favBtn.appendChild(fspan);
+        
+        // Check current favorite status
+        try {
+            Millennium.callServerMethod('luatools', 'IsGameFavorite', { appid: appid, contentScriptQuery: '' }).then(function(res){
+                const payload = typeof res === 'string' ? JSON.parse(res) : res;
+                const isFav = payload && payload.success && payload.isFavorite === true;
+                if (isFav) {
+                    favBtn.style.background = 'rgba(255,193,7,0.3)';
+                    favBtn.style.borderColor = '#ffc107';
+                    fspan.textContent = '⭐ ' + lt('Favorited');
+                }
+            }).catch(function() {});
+        } catch(_) {}
+        
+        favBtn.onclick = function(e){
+            e.preventDefault();
+            const isFav = favBtn.style.background.includes('255,193,7');
+            try {
+                Millennium.callServerMethod('luatools', 'SetGameFavorite', { appid: appid, isFavorite: !isFav, contentScriptQuery: '' }).then(function(){
+                    if (isFav) {
+                        favBtn.style.background = '';
+                        favBtn.style.borderColor = '';
+                        fspan.textContent = '⭐ ' + lt('Favorite');
+                    } else {
+                        favBtn.style.background = 'rgba(255,193,7,0.3)';
+                        favBtn.style.borderColor = '#ffc107';
+                        fspan.textContent = '⭐ ' + lt('Favorited');
+                    }
+                }).catch(function(err){
+                    ShowLuaToolsAlert('LuaTools', lt('Failed to update favorite status'));
+                });
+            } catch(err) {
+                ShowLuaToolsAlert('LuaTools', lt('Failed to update favorite status'));
+            }
+        };
+        
+        const statsBtn = document.querySelector('.luatools-stats-button');
+        if (statsBtn && statsBtn.after) {
+            statsBtn.after(favBtn);
+        } else {
+            steamdbContainer.appendChild(favBtn);
+        }
+        backendLog('Inserted Favorite button');
+    }
+
+    function showSearchAndFilterUI() {
+        if (document.querySelector('.luatools-search-overlay')) return;
+        
+        ensureLuaToolsAnimations();
+        ensureFontAwesome();
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'luatools-search-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(8px);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn 0.2s ease-out;';
+        
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position:relative;background:linear-gradient(135deg, #1b2838 0%, #2a475e 100%);color:#fff;border:2px solid #66c0f4;border-radius:8px;min-width:500px;max-width:700px;max-height:80vh;display:flex;flex-direction:column;padding:28px 32px;box-shadow:0 20px 60px rgba(0,0,0,.8), 0 0 0 1px rgba(102,192,244,0.3);animation:slideUp 0.1s ease-out;';
+        
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid rgba(102,192,244,0.3);';
+        
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size:24px;color:#fff;font-weight:700;text-shadow:0 2px 8px rgba(102,192,244,0.4);background:linear-gradient(135deg, #66c0f4 0%, #a4d7f5 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
+        title.textContent = lt('Search Games');
+        
+        const closeBtn = document.createElement('a');
+        closeBtn.href = '#';
+        closeBtn.style.cssText = 'display:flex;align-items:center;justify-content:center;width:40px;height:40px;background:rgba(102,192,244,0.1);border:1px solid rgba(102,192,244,0.3);border-radius:10px;color:#66c0f4;font-size:18px;text-decoration:none;transition:all 0.3s ease;cursor:pointer;';
+        closeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        closeBtn.title = lt('Close');
+        closeBtn.onmouseover = function() { this.style.background = 'rgba(102,192,244,0.25)'; this.style.transform = 'translateY(-2px) scale(1.05)'; };
+        closeBtn.onmouseout = function() { this.style.background = 'rgba(102,192,244,0.1)'; this.style.transform = 'translateY(0) scale(1)'; };
+        closeBtn.onclick = function(e){ e.preventDefault(); overlay.remove(); };
+        
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+        modal.appendChild(header);
+        
+        // Search box
+        const searchBox = document.createElement('input');
+        searchBox.type = 'text';
+        searchBox.placeholder = lt('Search by name, tags...');
+        searchBox.style.cssText = 'width:100%;padding:12px 16px;background:#16202d;color:#dfe6f0;border:1px solid #2a475e;border-radius:6px;font-size:14px;margin-bottom:16px;';
+        searchBox.addEventListener('input', function() {
+            clearTimeout(searchBox.dataset.searchTimeout);
+            searchBox.dataset.searchTimeout = setTimeout(function() {
+                performSearch(searchBox.value);
+            }, 300);
+        });
+        modal.appendChild(searchBox);
+        
+        // Filter tags
+        const filterContainer = document.createElement('div');
+        filterContainer.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;';
+        
+        const filterTags = ['has_mods', 'has_fixes', 'recently_added'];
+        const filterButtons = {};
+        
+        filterTags.forEach(function(tag) {
+            const btn = document.createElement('a');
+            btn.href = '#';
+            btn.className = 'btnv6_blue_hoverfade btn_small';
+            btn.innerHTML = '<span>' + (tag === 'has_mods' ? '🎮 Mods' : tag === 'has_fixes' ? '🔧 Fixes' : '📅 Recent') + '</span>';
+            btn.style.opacity = '0.6';
+            btn.onclick = function(e) {
+                e.preventDefault();
+                btn.dataset.selected = btn.dataset.selected === '1' ? '0' : '1';
+                btn.style.opacity = btn.data.selected === '1' ? '1' : '0.6';
+                applyFilters();
+            };
+            filterButtons[tag] = btn;
+            filterContainer.appendChild(btn);
+        });
+        modal.appendChild(filterContainer);
+        
+        // Results
+        const resultsContainer = document.createElement('div');
+        resultsContainer.style.cssText = 'flex:1;overflow-y:auto;padding:16px;border:1px solid rgba(102,192,244,0.3);border-radius:12px;background:rgba(11,20,30,0.6);';
+        resultsContainer.innerHTML = '<div style="text-align:center;color:#8f98a0;padding:40px 20px;">' + lt('Type to search...') + '</div>';
+        modal.appendChild(resultsContainer);
+        
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        
+        let currentQuery = '';
+        let currentFilters = {};
+        
+        function performSearch(query) {
+            currentQuery = query;
+            resultsContainer.innerHTML = '<div style="text-align:center;color:#8f98a0;padding:20px;"><i class="fa-solid fa-spinner" style="animation:pulse 1s infinite;margin-right:8px;"></i>' + lt('Searching...') + '</div>';
+            
+            try {
+                Millennium.callServerMethod('luatools', 'SearchGames', { query: query, contentScriptQuery: '' }).then(function(res){
+                    try {
+                        const payload = typeof res === 'string' ? JSON.parse(res) : res;
+                        const results = (payload && payload.success && Array.isArray(payload.results)) ? payload.results : [];
+                        
+                        if (results.length === 0) {
+                            resultsContainer.innerHTML = '<div style="text-align:center;color:#8f98a0;padding:40px 20px;">' + lt('No games found.') + '</div>';
+                            return;
+                        }
+                        
+                        resultsContainer.innerHTML = '';
+                        results.forEach(function(game) {
+                            const gameEl = document.createElement('div');
+                            gameEl.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px;margin-bottom:8px;background:rgba(102,192,244,0.08);border:1px solid rgba(102,192,244,0.2);border-radius:8px;transition:all 0.3s ease;cursor:pointer;';
+                            gameEl.onmouseover = function() { this.style.background = 'rgba(102,192,244,0.15)'; };
+                            gameEl.onmouseout = function() { this.style.background = 'rgba(102,192,244,0.08)'; };
+                            
+                            const icon = document.createElement('img');
+                            icon.src = game.icon || '';
+                            icon.style.cssText = 'width:48px;height:48px;border-radius:6px;object-fit:cover;';
+                            icon.onerror = function() { this.style.background = '#2a475e'; };
+                            
+                            const info = document.createElement('div');
+                            info.style.cssText = 'flex:1;min-width:0;';
+                            
+                            const gameName = document.createElement('div');
+                            gameName.style.cssText = 'font-weight:600;color:#fff;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                            gameName.textContent = game.name;
+                            
+                            const gameTags = document.createElement('div');
+                            gameTags.style.cssText = 'font-size:11px;color:#8f98a0;';
+                            const tagList = (game.tags && Array.isArray(game.tags)) ? game.tags.join(', ') : '';
+                            gameTags.textContent = tagList || 'No tags';
+                            
+                            info.appendChild(gameName);
+                            info.appendChild(gameTags);
+                            
+                            gameEl.appendChild(icon);
+                            gameEl.appendChild(info);
+                            
+                            gameEl.onclick = function() {
+                                try {
+                                    window.location.href = 'https://store.steampowered.com/app/' + game.appid;
+                                } catch(_) {}
+                            };
+                            
+                            resultsContainer.appendChild(gameEl);
+                        });
+                    } catch(err) {
+                        resultsContainer.innerHTML = '<div style="color:#c7254e;">Error parsing search results</div>';
+                    }
+                }).catch(function(err) {
+                    resultsContainer.innerHTML = '<div style="color:#c7254e;">Search failed</div>';
+                });
+            } catch(err) {
+                resultsContainer.innerHTML = '<div style="color:#c7254e;">Search failed</div>';
+            }
+        }
+        
+        function applyFilters() {
+            const filters = {};
+            for (const tag in filterButtons) {
+                if (filterButtons[tag].dataset.selected === '1') {
+                    filters[tag] = true;
+                }
+            }
+            currentFilters = filters;
+            performSearch(currentQuery);
+        }
+    }
+
+    function showActivityDashboard() {
+        if (document.querySelector('.luatools-activity-overlay')) return;
+        
+        ensureLuaToolsAnimations();
+        ensureFontAwesome();
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'luatools-activity-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(8px);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn 0.2s ease-out;';
+        
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position:relative;background:linear-gradient(135deg, #1b2838 0%, #2a475e 100%);color:#fff;border:2px solid #66c0f4;border-radius:8px;min-width:500px;max-width:700px;max-height:80vh;display:flex;flex-direction:column;padding:28px 32px;box-shadow:0 20px 60px rgba(0,0,0,.8), 0 0 0 1px rgba(102,192,244,0.3);animation:slideUp 0.1s ease-out;';
+        
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid rgba(102,192,244,0.3);';
+        
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size:24px;color:#fff;font-weight:700;text-shadow:0 2px 8px rgba(102,192,244,0.4);background:linear-gradient(135deg, #66c0f4 0%, #a4d7f5 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
+        title.textContent = lt('Real-time Activity');
+        
+        const closeBtn = document.createElement('a');
+        closeBtn.href = '#';
+        closeBtn.style.cssText = 'display:flex;align-items:center;justify-content:center;width:40px;height:40px;background:rgba(102,192,244,0.1);border:1px solid rgba(102,192,244,0.3);border-radius:10px;color:#66c0f4;font-size:18px;text-decoration:none;transition:all 0.3s ease;cursor:pointer;';
+        closeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        closeBtn.title = lt('Close');
+        closeBtn.onmouseover = function() { this.style.background = 'rgba(102,192,244,0.25)'; this.style.transform = 'translateY(-2px) scale(1.05)'; };
+        closeBtn.onmouseout = function() { this.style.background = 'rgba(102,192,244,0.1)'; this.style.transform = 'translateY(0) scale(1)'; };
+        closeBtn.onclick = function(e){ e.preventDefault(); clearActivityPolling(); overlay.remove(); };
+        
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+        modal.appendChild(header);
+        
+        const content = document.createElement('div');
+        content.style.cssText = 'flex:1;overflow-y:auto;padding:16px;border:1px solid rgba(102,192,244,0.3);border-radius:12px;background:rgba(11,20,30,0.6);';
+        content.innerHTML = '<div style="text-align:center;color:#8f98a0;padding:40px 20px;"><i class="fa-solid fa-spinner" style="animation:pulse 1s infinite;margin-right:8px;"></i>' + lt('Loading activity...') + '</div>';
+        modal.appendChild(content);
+        
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        
+        let activityPollingInterval = null;
+        
+        function clearActivityPolling() {
+            if (activityPollingInterval) {
+                clearInterval(activityPollingInterval);
+                activityPollingInterval = null;
+            }
+        }
+        
+        function updateActivityDisplay() {
+            try {
+                Millennium.callServerMethod('luatools', 'GetActivityDashboard', { contentScriptQuery: '' }).then(function(res){
+                    try {
+                        const payload = typeof res === 'string' ? JSON.parse(res) : res;
+                        
+                        if (!payload || !payload.success) {
+                            content.innerHTML = '<div style="text-align:center;color:#8f98a0;padding:40px 20px;">' + lt('No active operations') + '</div>';
+                            return;
+                        }
+                        
+                        const operations = payload.operations || [];
+                        
+                        if (!operations || operations.length === 0) {
+                            content.innerHTML = '<div style="text-align:center;color:#8f98a0;padding:40px 20px;">' + lt('No active operations') + '</div>';
+                            return;
+                        }
+                        
+                        content.innerHTML = '';
+                        
+                        operations.forEach(function(op) {
+                            const opEl = document.createElement('div');
+                            opEl.style.cssText = 'padding:12px;margin-bottom:12px;background:rgba(102,192,244,0.08);border:1px solid rgba(102,192,244,0.2);border-radius:8px;';
+                            
+                            const opName = document.createElement('div');
+                            opName.style.cssText = 'font-weight:600;color:#fff;margin-bottom:8px;display:flex;justify-content:space-between;';
+                            const nameSpan = document.createElement('span');
+                            nameSpan.textContent = op.name || 'Unknown Operation';
+                            const statusSpan = document.createElement('span');
+                            statusSpan.style.cssText = 'font-size:12px;color:#8f98a0;font-weight:normal;';
+                            statusSpan.textContent = (op.status || 'running').toUpperCase();
+                            opName.appendChild(nameSpan);
+                            opName.appendChild(statusSpan);
+                            opEl.appendChild(opName);
+                            
+                            // Progress bar
+                            const progressWrap = document.createElement('div');
+                            progressWrap.style.cssText = 'background:rgba(42,71,94,0.5);height:8px;border-radius:4px;overflow:hidden;margin-bottom:8px;border:1px solid rgba(102,192,244,0.2);';
+                            const progressBar = document.createElement('div');
+                            const percent = op.totalBytes > 0 ? Math.floor((op.bytesRead / op.totalBytes) * 100) : 0;
+                            progressBar.style.cssText = 'height:100%;width:' + percent + '%;background:linear-gradient(90deg, #66c0f4 0%, #a4d7f5 100%);transition:width 0.3s ease;';
+                            progressWrap.appendChild(progressBar);
+                            opEl.appendChild(progressWrap);
+                            
+                            // Speed and info
+                            const infoRow = document.createElement('div');
+                            infoRow.style.cssText = 'display:flex;justify-content:space-between;font-size:12px;color:#8f98a0;';
+                            const progress = document.createElement('span');
+                            const bytesRead = op.bytesRead || 0;
+                            const totalBytes = op.totalBytes || 0;
+                            const readMB = (bytesRead / (1024 * 1024)).toFixed(1);
+                            const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
+                            progress.textContent = readMB + ' MB / ' + totalMB + ' MB';
+                            const speed = document.createElement('span');
+                            const speedBytesPerSec = op.speedBytesPerSec || 0;
+                            const speedMBPerSec = (speedBytesPerSec / (1024 * 1024)).toFixed(2);
+                            speed.textContent = speedMBPerSec + ' MB/s';
+                            infoRow.appendChild(progress);
+                            infoRow.appendChild(speed);
+                            opEl.appendChild(infoRow);
+                            
+                            content.appendChild(opEl);
+                        });
+                    } catch(err) {
+                        backendLog('LuaTools: Activity parse error: ' + err);
+                        content.innerHTML = '<div style="color:#c7254e;">Error loading activity</div>';
+                    }
+                }).catch(function(err) {
+                    backendLog('LuaTools: Activity fetch error: ' + err);
+                });
+            } catch(err) {
+                backendLog('LuaTools: Activity error: ' + err);
+            }
+        }
+        
+        // Initial update
+        updateActivityDisplay();
+        
+        // Poll for updates every second
+        activityPollingInterval = setInterval(function() {
+            if (!document.querySelector('.luatools-activity-overlay')) {
+                clearActivityPolling();
+                return;
+            }
+            updateActivityDisplay();
+        }, 1000);
+        
+        // Store polling interval on overlay for cleanup
+        overlay.dataset.pollingInterval = activityPollingInterval;
+    }
+
     if (typeof MutationObserver !== 'undefined') {
         const observer = new MutationObserver(function(mutations) {
             mutations.forEach(function(mutation) {
@@ -2404,6 +3085,7 @@
                     // Always update translations when DOM changes
                     updateButtonTranslations();
                     addLuaToolsButton();
+                    addFavoriteStarButton();
                 }
             });
         });
