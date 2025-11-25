@@ -418,10 +418,6 @@ def GetTranslations(contentScriptQuery: str = "", language: str = "", **kwargs: 
         return json.dumps({"success": False, "error": str(exc)})
 
 
-# ============================================================================
-# NEW FEATURE API ENDPOINTS (Phase 1: Foundation Features)
-# ============================================================================
-
 def GetStatistics(contentScriptQuery: str = "") -> str:
     """Get plugin statistics."""
     try:
