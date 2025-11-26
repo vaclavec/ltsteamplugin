@@ -137,6 +137,7 @@ def get_dashboard_json() -> str:
     data = get_dashboard_data()
     return json.dumps({
         "success": True,
+        "operations": data.get("current_operations", []),
         "dashboard": data,
     })
 

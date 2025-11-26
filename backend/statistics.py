@@ -179,6 +179,19 @@ def get_statistics() -> Dict[str, Any]:
     """Return current statistics."""
     with STATS_LOCK:
         _ensure_stats_initialized()
+        
+        # Calculate last 7 days downloads
+        today = time.time()
+        seven_days_ago = today - (7 * 24 * 3600)
+        last_7_days_downloads = 0
+        for date_str, daily_stat in _STATS_CACHE.get("daily_stats", {}).items():
+            try:
+                date_time = time.mktime(time.strptime(date_str, "%Y-%m-%d"))
+                if date_time >= seven_days_ago:
+                    last_7_days_downloads += daily_stat.get("downloads", 0)
+            except Exception:
+                pass
+        
         return {
             "total_mods_installed": _STATS_CACHE.get("total_mods_installed", 0),
             "total_games_with_mods": _STATS_CACHE.get("total_games_with_mods", 0),
@@ -187,8 +200,9 @@ def get_statistics() -> Dict[str, Any]:
             "total_downloads": _STATS_CACHE.get("total_downloads", 0),
             "total_api_fetches": _STATS_CACHE.get("total_api_fetches", 0),
             "total_bytes_downloaded": _STATS_CACHE.get("total_bytes_downloaded", 0),
-            "games_with_mods_count": len(_STATS_CACHE.get("games_with_mods", {})),
-            "games_with_fixes_count": len(_STATS_CACHE.get("games_with_fixes", {})),
+            "games_with_mods": list(_STATS_CACHE.get("games_with_mods", {}).values()),
+            "games_with_fixes": list(_STATS_CACHE.get("games_with_fixes", {}).values()),
+            "last_7_days_downloads": last_7_days_downloads,
         }
 
 

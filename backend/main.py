@@ -9,6 +9,13 @@ from typing import Any, List
 import Millennium  # type: ignore
 import PluginUtils  # type: ignore
 
+from backup_manager import (
+    create_backup,
+    delete_backup,
+    get_backups_list,
+    open_backup_location,
+    restore_backup,
+)
 from api_manifest import (
     fetch_free_apis_now as api_fetch_free_apis_now,
     get_init_apis_message as api_get_init_message,
@@ -79,6 +86,7 @@ from game_metadata import (
     get_game_metadata,
     get_games_by_tag,
     get_metadata_json,
+    is_game_favorite,
     search_games,
     set_game_favorite,
     set_game_notes,
@@ -607,6 +615,56 @@ def DisableBandwidthLimit(contentScriptQuery: str = "") -> str:
         return json.dumps({"success": True, "message": "Bandwidth limiting disabled"})
     except Exception as exc:
         logger.warn(f"LuaTools: DisableBandwidthLimit failed: {exc}")
+        return json.dumps({"success": False, "error": str(exc)})
+
+
+def CreateBackup(backup_name: str = "", destination: str = "", contentScriptQuery: str = "") -> str:
+    """Create a backup of Steam config folders."""
+    try:
+        result = create_backup(backup_name, destination)
+        return json.dumps(result)
+    except Exception as exc:
+        logger.warn(f"LuaTools: CreateBackup failed: {exc}")
+        return json.dumps({"success": False, "error": str(exc)})
+
+
+def RestoreBackup(backup_path: str, restore_location: str = "", contentScriptQuery: str = "") -> str:
+    """Restore a backup of Steam config folders."""
+    try:
+        result = restore_backup(backup_path, restore_location)
+        return json.dumps(result)
+    except Exception as exc:
+        logger.warn(f"LuaTools: RestoreBackup failed: {exc}")
+        return json.dumps({"success": False, "error": str(exc)})
+
+
+def GetBackupsList(backup_location: str = "", contentScriptQuery: str = "") -> str:
+    """Get list of available backups."""
+    try:
+        result = get_backups_list(backup_location)
+        return json.dumps(result)
+    except Exception as exc:
+        logger.warn(f"LuaTools: GetBackupsList failed: {exc}")
+        return json.dumps({"success": False, "error": str(exc)})
+
+
+def DeleteBackup(backup_path: str, contentScriptQuery: str = "") -> str:
+    """Delete a backup file."""
+    try:
+        result = delete_backup(backup_path)
+        return json.dumps(result)
+    except Exception as exc:
+        logger.warn(f"LuaTools: DeleteBackup failed: {exc}")
+        return json.dumps({"success": False, "error": str(exc)})
+
+
+def OpenBackupLocation(backup_path: str, contentScriptQuery: str = "") -> str:
+    """Open a backup file location in file manager."""
+    try:
+        result = open_backup_location(backup_path)
+        return json.dumps(result)
+    except Exception as exc:
+        logger.warn(f"LuaTools: OpenBackupLocation failed: {exc}")
         return json.dumps({"success": False, "error": str(exc)})
 
 

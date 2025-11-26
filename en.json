@@ -1,1 +1,4 @@
-balls
+{
+  "plugin_name": "LuaTools",
+  "plugin_description": "LuaTools Steam Plugin - Game fixes and management"
+}
