@@ -445,6 +445,11 @@ class Plugin:
         except Exception as exc:
             logger.warn(f"AutoUpdate: apply pending failed: {exc}")
 
+        try:
+            init_applist()
+        except Exception as exc:
+            logger.warn(f"LuaTools: Applist initialization failed: {exc}")
+
         _copy_webkit_files()
         _inject_webkit_files()
 
